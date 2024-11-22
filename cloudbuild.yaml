@@ -1,5 +1,7 @@
 steps:
-  - name: 'gcr.io/cloudbuild/docker'
-    args: ['build', '-t', 'us-central1-docker.pkg.dev/oxypals-grafana/oxypals-grafana-artrepo/grafana', '.']
+- name: 'gcr.io/cloud-builders/docker'
+  args: [ 'build', '-t', 'us-central1-docker.pkg.dev/oxypald-grafana/oxypals-grafana-artrepo/grafana', '.' ]
+images:
+- 'us-central1-docker.pkg.dev/oxypald-grafana/oxypals-grafana-artrepo/grafana'
 options:
-  logging: CLOUD_LOGGING_ONLY
+  logging: 'CLOUD_LOGGING_ONLY'  # Or 'NONE'
