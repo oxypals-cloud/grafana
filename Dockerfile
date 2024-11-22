@@ -68,11 +68,6 @@ COPY pkg/semconv/go.* pkg/semconv/
 COPY pkg/aggregator/go.* pkg/aggregator/
 COPY apps/playlist/go.* apps/playlist/
 
-RUN go mod download
-RUN if [[ "$BINGO" = "true" ]]; then \
-      go install github.com/bwplotka/bingo@latest && \
-      bingo get -v; \
-    fi
 
 COPY embed.go Makefile build.go package.json ./
 COPY cue.mod cue.mod
@@ -86,6 +81,13 @@ COPY pkg pkg
 COPY scripts scripts
 COPY conf conf
 COPY .github .github
+
+RUN go mod download
+RUN if [[ "$BINGO" = "true" ]]; then \
+      go install github.com/bwplotka/bingo@latest && \
+      bingo get -v; \
+    fi
+
 
 ENV COMMIT_SHA=${COMMIT_SHA}
 ENV BUILD_BRANCH=${BUILD_BRANCH}
