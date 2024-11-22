@@ -24,9 +24,9 @@ COPY conf/defaults.ini ./conf/defaults.ini
 
 RUN apk add --no-cache make build-base python3
 
-RUN yarn install --immutable
+RUN yarn install
 
-COPY tsconfig.json .eslintrc .editorconfig .browserslistrc .prettierrc.js ./
+COPY tsconfig.json eslint.config.js .editorconfig .browserslistrc .prettierrc.js ./
 COPY scripts scripts
 COPY emails emails
 
@@ -68,11 +68,6 @@ COPY pkg/semconv/go.* pkg/semconv/
 COPY pkg/aggregator/go.* pkg/aggregator/
 COPY apps/playlist/go.* apps/playlist/
 
-RUN go mod download
-RUN if [[ "$BINGO" = "true" ]]; then \
-      go install github.com/bwplotka/bingo@latest && \
-      bingo get -v; \
-    fi
 
 COPY embed.go Makefile build.go package.json ./
 COPY cue.mod cue.mod
@@ -87,8 +82,27 @@ COPY scripts scripts
 COPY conf conf
 COPY .github .github
 
+RUN go mod download
+RUN if [[ "$BINGO" = "true" ]]; then \
+      go install github.com/bwplotka/bingo@latest && \
+      bingo get -v; \
+    fi
+
+
 ENV COMMIT_SHA=${COMMIT_SHA}
 ENV BUILD_BRANCH=${BUILD_BRANCH}
+RUN go get github.com/grafana/grafana-app-sdk/app
+RUN go get github.com/grafana/grafana-app-sdk/simple
+RUN go get github.com/grafana/grafana/apps/playlist/pkg/apis
+RUN go get github.com/grafana/grafana/apps/playlist/pkg/apis/playlist/v0alpha1
+RUN go get github.com/grafana/grafana/apps/playlist/pkg/app
+RUN go get github.com/grafana/grafana/pkg/apimachinery/utils
+RUN go get github.com/grafana/grafana/pkg/apiserver/rest
+RUN go get github.com/grafana/grafana/pkg/services/apiserver/builder/runner
+RUN go get github.com/grafana/grafana/pkg/services/apiserver/endpoints/request
+RUN go get github.com/grafana/grafana/pkg/services/featuremgmt
+RUN go get github.com/grafana/grafana/pkg/services/playlist
+RUN go get github.com/grafana/grafana/pkg/setting
 
 RUN make build-go GO_BUILD_TAGS=${GO_BUILD_TAGS} WIRE_TAGS=${WIRE_TAGS}
 
