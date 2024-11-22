@@ -104,7 +104,6 @@ RUN go get github.com/grafana/grafana/pkg/services/featuremgmt
 RUN go get github.com/grafana/grafana/pkg/services/playlist
 RUN go get github.com/grafana/grafana/pkg/setting
 
-RUN go get github.com/grafana/grafana/apps/playlist/pkg/apis/playlist/v0alpha1
 RUN make build-go GO_BUILD_TAGS=${GO_BUILD_TAGS} WIRE_TAGS=${WIRE_TAGS}
 
 FROM ${BASE_IMAGE} as tgz-builder
