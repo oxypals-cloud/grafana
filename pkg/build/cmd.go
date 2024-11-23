@@ -183,6 +183,21 @@ func doBuild(binaryName, pkg string, opts BuildOpts) error {
 		return err
 	}
 
+	if binaryName == "grafana" {
+		getArgs := []string{"get", "github.com/grafana/grafana/apps/playlist/pkg/apis/playlist/v0alpha1"}
+		runPrint("go", getArgs...)
+		getArgs = []string{"get", "github.com/grafana/grafana/apps/playlist/pkg/apis"}
+		runPrint("go", getArgs...)
+		getArgs = []string{"get", "github.com/grafana/grafana/apps/playlist/pkg/app"}
+		runPrint("go", getArgs...)
+		getArgs = []string{"mod", "tidy"}
+		runPrint("go", getArgs...)
+		getArgs = []string{"mod", "download"}
+		runPrint("go", getArgs...)
+		getArgs = []string{"mod", "tidy"}
+		runPrint("go", getArgs...)
+	}
+
 	args := []string{"build", "-ldflags", lf}
 
 	if opts.goos == GoOSWindows {

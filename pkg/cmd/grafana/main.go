@@ -11,6 +11,9 @@ import (
 	"github.com/grafana/grafana/pkg/cmd/grafana-server/commands"
 	"github.com/grafana/grafana/pkg/server"
 	"github.com/grafana/grafana/pkg/services/apiserver/standalone"
+	"github.com/grafana/grafana/apps/playlist/pkg/apis/playlist/v0alpha1"
+	"github.com/grafana/grafana/apps/playlist/pkg/apis"
+	"github.com/grafana/grafana/apps/playlist/pkg/app"
 )
 
 // The following variables cannot be constants, since they can be overridden through the -X link flag
