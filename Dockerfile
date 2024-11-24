@@ -1,122 +1,164 @@
+# [section:buildargs] ==================================================================
 ARG BASE_IMAGE=ubuntu:24.04
-ARG JS_IMAGE=node:20-alpine
-ARG JS_PLATFORM=linux/amd64
-ARG GO_IMAGE=golang:1.23.1-alpine
-
-ARG GO_SRC=go-builder
-
-FROM ubuntu:24.04
-RUN apt update && apt -y upgrade
-RUN apt -y install wget
-RUN apt -y install curl
-RUN apt -y install git-all
-RUN apt-get update
-RUN apt-get -y install make
-RUN apt -y install golang-go
-RUN apt -y install gcc
-
-##COPY ./brwinst.sh brwinst.sh
-#RUN chmod +x brwinst.sh
-#ENV NOINTERACTIVE=1
-#ENV CI=1
-#RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-# installs nvm (Node Version Manager)
-#RUN /bin/bash -c "$(curl -fsSL curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.0/install.sh)"
-
-#RUN curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -
-#RUN echo "deb https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list
-#RUN apt update && apt install yarn
-#RUN yarn install --immutable
-#RUN yarn build
-
-RUN git clone https://github.com/grafana/grafana
-WORKDIR /grafana
-RUN git checkout v11.3.1
-
-ENV GO_BUILD_DEV=1
-RUN go work use .
-RUN go mod tidy
-RUN make build-go
-RUN make gen-jsonnet
-
 ARG GF_UID="472"
 ARG GF_GID="0"
+ARG GF_NAME="grafana"
+ARG GF_PORT=3000
+ARG REPO_URL="https://github.com/grafana/grafana"
+ARG REPO_TAG="v11.3.1"
+ARG BUILD_PLATFORM="linux-amd64"
 
-ENV PATH="/usr/share/grafana/bin:$PATH" \
-    GF_PATHS_CONFIG="/etc/grafana/grafana.ini" \
-    GF_PATHS_DATA="/var/lib/grafana" \
-    GF_PATHS_HOME="/usr/share/grafana" \
-    GF_PATHS_LOGS="/var/log/grafana" \
-    GF_PATHS_PLUGINS="/var/lib/grafana/plugins" \
-    GF_PATHS_PROVISIONING="/etc/grafana/provisioning"
+FROM ${BASE_IMAGE} AS base_env
+ARG GF_NAME
 
-WORKDIR $GF_PATHS_HOME
+# [section:environment] ===============================================================
+ENV SYS_GF_ROOT="/usr/share"
+ENV SYS_GF_LIB="/var/lib"
+ENV SYS_GF_LOG="/var/log"
 
-RUN if grep -i -q alpine /etc/issue; then \
-      apk add --no-cache ca-certificates bash curl tzdata musl-utils && \
-      apk info -vv | sort; \
-    elif grep -i -q ubuntu /etc/issue; then \
-      DEBIAN_FRONTEND=noninteractive && \
-      apt-get update && \
-      apt-get install -y ca-certificates curl tzdata musl && \
-      apt-get autoremove -y && \
-      rm -rf /var/lib/apt/lists/*; \
-    else \
-      echo 'ERROR: Unsupported base image' && /bin/false; \
-    fi
+ENV GF_PATHS_CONFIG="/etc/${GF_NAME}/grafana.ini" 
+ENV GF_PATHS_DATA="${SYS_GF_LIB}/${GF_NAME}" 
+ENV GF_PATHS_HOME="${SYS_GF_ROOT}/${GF_NAME}" 
+ENV GF_PATHS_BIN="${SYS_GF_ROOT}/${GF_NAME}/bin" 
+ENV GF_PATHS_LOGS="${SYS_GF_LOG}/${GF_NAME}" 
+ENV GF_PATHS_PLUGINS="${SYS_GF_LIB}/${GF_NAME}/plugins" 
+ENV GF_PATHS_PROVISIONING="/etc/${GF_NAME}/provisioning"
 
-# glibc support for alpine x86_64 only
-RUN if grep -i -q alpine /etc/issue && [ `arch` = "x86_64" ]; then \
-      wget -q -O /etc/apk/keys/sgerrand.rsa.pub https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub && \
-      wget https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.35-r0/glibc-2.35-r0.apk \
-        -O /tmp/glibc-2.35-r0.apk && \
-      wget https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.35-r0/glibc-bin-2.35-r0.apk \
-        -O /tmp/glibc-bin-2.35-r0.apk && \
-      apk add --force-overwrite --no-cache /tmp/glibc-2.35-r0.apk /tmp/glibc-bin-2.35-r0.apk && \
-      rm -f /lib64/ld-linux-x86-64.so.2 && \
-      ln -s /usr/glibc-compat/lib64/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2 && \
-      rm -f /tmp/glibc-2.35-r0.apk && \
-      rm -f /tmp/glibc-bin-2.35-r0.apk && \
-      rm -f /lib/ld-linux-x86-64.so.2 && \
-      rm -f /etc/ld.so.cache; \
-    fi
-COPY conf ./conf
+ENV BUILD_ROOT="/usr/local"
+ENV BUILD_REPO="${BUILD_ROOT}/${GF_NAME}-repo"
+ENV BUILD_OUTPUT="${BUILD_REPO}/bin"
+ENV BUILD_RUNSH="${BUILD_REPO}/packagaging/docker"
+
+# [section:buildtools] ==================================================================
+FROM base_env AS build_tools
+
+RUN apt update && \ 
+    apt -y upgrade && \
+    apt -y install wget && \
+    apt -y install curl && \
+    apt -y install git-all && \
+    apt -y install gcc && \
+    apt -y install gcc g++ make && \
+    apt-get update 
+
+#[section:buildenv] =====================================================================
+FROM build_tools AS build_env
+ARG REPO_URL
+ARG REPO_TAG
+
+WORKDIR ${BUILD_ROOT}
+RUN git clone ${REPO_URL} ${BUILD_REPO} && \ 
+    cd ${BUILD_REPO} && \
+    git checkout ${REPO_TAG}
+
+# [section:go1.23.1] ====================================================================
+FROM build_env AS go_build_env
+WORKDIR ${BUILD_ROOT}
+
+ENV GOROOT="${BUILD_ROOT}/go"
+ENV PATH="${PATH}:${GOROOT}"
+ENV GOPATH="${BUILD_ROOT}/go/bin"
+ENV PATH="${PATH}:${GOPATH}"
+
+RUN mkdir ${GOROOT} && mkdir ${GOPATH}
+RUN mkdir ${BUILD_ROOT}/downloads && \
+    cd ${BUILD_ROOT}/downloads && wget -c https://go.dev/dl/go1.23.1.linux-amd64.tar.gz && \
+    tar -C ${BUILD_ROOT} -xzf go1.23.1.linux-amd64.tar.gz
+RUN go version
+
+#[section:node] ==========================================================================
+FROM go_build_env AS node_build_env
+
+RUN apt install -y ca-certificates curl gnupg && \
+    mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+
+RUN apt update && \
+    apt -y install npm nodejs
+RUN node -v 
+RUN npm -v
+
+RUN curl -sL https://dl.yarnpkg.com/debian/pubkey.gpg | gpg --dearmor | tee /usr/share/keyrings/yarnkey.gpg >/dev/null && \
+    echo "deb [signed-by=/usr/share/keyrings/yarnkey.gpg] https://dl.yarnpkg.com/debian stable main" | tee /etc/apt/sources.list.d/yarn.list && \
+    apt update && apt-get install yarn -y    
+RUN yarn -v
+
+RUN apt-get update && \
+    apt-get -y install build-essential python3
+
+# [section:grafana-backend] ================================================================
+FROM node_build_env AS grafana_backend_build
+WORKDIR ${BUILD_REPO}
+
+ENV GO_BUILD_DEV=1
+RUN go work use . && \
+    go mod tidy
+RUN make build-go && \
+    make gen-jsonnet
+
+# [section:grafana-frontend] ===============================================================
+FROM grafana_backend_build AS grafana_frontend_build
+WORKDIR ${BUILD_REPO}
+
+ENV NODE_OPTIONS=--max_old_space_size=8000
+ENV NODE_ENV=production
+
+RUN yarn install
+RUN yarn build
+
+# [section:grafana-host]
+FROM grafana_frontend_build AS grafana_host
+ARG GF_GID
+ARG GF_UID
+ARG BUILD_PLATFORM
+
+WORKDIR ${GF_PATHS_HOME}
+
+RUN DEBIAN_FRONTEND=noninteractive && \
+    apt-get update && \
+    apt-get install -y ca-certificates curl tzdata musl && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN cp -r ${BUILD_REPO}/conf ./conf
+
 RUN if [ ! $(getent group "$GF_GID") ]; then \
-      if grep -i -q alpine /etc/issue; then \
-        addgroup -S -g $GF_GID grafana; \
-      else \
-        addgroup --system --gid $GF_GID grafana; \
-      fi; \
+      addgroup --system --gid $GF_GID grafana; \
     fi && \
     GF_GID_NAME=$(getent group $GF_GID | cut -d':' -f1) && \
     mkdir -p "$GF_PATHS_HOME/.aws" && \
-    if grep -i -q alpine /etc/issue; then \
-      adduser -S -u $GF_UID -G "$GF_GID_NAME" grafana; \
-    else \
-      adduser --system --uid $GF_UID --ingroup "$GF_GID_NAME" grafana; \
-    fi && \
+    adduser --system --uid $GF_UID --ingroup "$GF_GID_NAME" grafana && \
     mkdir -p "$GF_PATHS_PROVISIONING/datasources" \
-             "$GF_PATHS_PROVISIONING/dashboards" \
-             "$GF_PATHS_PROVISIONING/notifiers" \
-             "$GF_PATHS_PROVISIONING/plugins" \
-             "$GF_PATHS_PROVISIONING/access-control" \
-             "$GF_PATHS_PROVISIONING/alerting" \
-             "$GF_PATHS_LOGS" \
-             "$GF_PATHS_PLUGINS" \
-             "$GF_PATHS_DATA" && \
+           "$GF_PATHS_PROVISIONING/dashboards" \
+           "$GF_PATHS_PROVISIONING/notifiers" \
+           "$GF_PATHS_PROVISIONING/plugins" \
+           "$GF_PATHS_PROVISIONING/access-control" \
+           "$GF_PATHS_PROVISIONING/alerting" \
+           "$GF_PATHS_LOGS" \
+           "$GF_PATHS_PLUGINS" \
+           "$GF_PATHS_DATA" \
+           "$GF_PATHS_BIN" && \
     cp conf/sample.ini "$GF_PATHS_CONFIG" && \
     cp conf/ldap.toml /etc/grafana/ldap.toml && \
     chown -R "grafana:$GF_GID_NAME" "$GF_PATHS_DATA" "$GF_PATHS_HOME/.aws" "$GF_PATHS_LOGS" "$GF_PATHS_PLUGINS" "$GF_PATHS_PROVISIONING" && \
     chmod -R 777 "$GF_PATHS_DATA" "$GF_PATHS_HOME/.aws" "$GF_PATHS_LOGS" "$GF_PATHS_PLUGINS" "$GF_PATHS_PROVISIONING"
 
-    COPY /bin/grafana* /tmp/grafana/bin/*/grafana* ./bin/
+#local build output ${BUILD_OUTPUT}/*/grafana* 
 
-    EXPOSE 6000
+RUN cp -r ${BUILD_OUTPUT}/grafana* ${GF_PATHS_BIN} && \
+    cp -r ${BUILD_REPO}/public ./public && \
+    cp -r ${BUILD_REPO}/LICENSE ./
 
-    ARG RUN_SH=./packaging/docker/run.sh
+# [section:entrypoint] =============================================================================
+FROM grafana_host AS grafana_image
+ARG GF_UID
+ARG GF_PORT
 
-    COPY ${RUN_SH} /run.sh
-    
-    USER "$GF_UID"
-    ENTRYPOINT [ "/run.sh" ]
+WORKDIR ${GF_PATHS_HOME}
 
+ENV PATH=$GF_PATHS_BIN:$PATH
+RUN cp -r ${BUILD_REPO}/packaging/docker/run.sh ./run.sh
+
+EXPOSE ${GF_PORT}
+USER "$GF_UID"
+ENTRYPOINT [ "./run.sh" ]
