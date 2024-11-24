@@ -1,132 +1,43 @@
-# syntax=docker/dockerfile:1
-
-ARG BASE_IMAGE=alpine:3.20
+ARG BASE_IMAGE=ubuntu:24.04
 ARG JS_IMAGE=node:20-alpine
 ARG JS_PLATFORM=linux/amd64
 ARG GO_IMAGE=golang:1.23.1-alpine
 
 ARG GO_SRC=go-builder
-ARG JS_SRC=js-builder
 
-FROM --platform=${JS_PLATFORM} ${JS_IMAGE} as js-builder
+FROM ubuntu:24.04
+RUN apt update && apt -y upgrade
+RUN apt -y install wget
+RUN apt -y install curl
+RUN apt -y install git-all
+RUN apt-get update
+RUN apt-get -y install make
+RUN apt -y install golang-go
+RUN apt -y install gcc
 
-ENV NODE_OPTIONS=--max_old_space_size=8000
+##COPY ./brwinst.sh brwinst.sh
+#RUN chmod +x brwinst.sh
+#ENV NOINTERACTIVE=1
+#ENV CI=1
+#RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+# installs nvm (Node Version Manager)
+#RUN /bin/bash -c "$(curl -fsSL curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.0/install.sh)"
 
-WORKDIR /tmp/grafana
+#RUN curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -
+#RUN echo "deb https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list
+#RUN apt update && apt install yarn
+#RUN yarn install --immutable
+#RUN yarn build
 
-COPY package.json project.json nx.json yarn.lock .yarnrc.yml ./
-COPY .yarn .yarn
-COPY packages packages
-COPY plugins-bundled plugins-bundled
-COPY public public
-COPY LICENSE ./
-COPY conf/defaults.ini ./conf/defaults.ini
+RUN git clone https://github.com/grafana/grafana
+WORKDIR /grafana
+RUN git checkout v11.3.1
 
-RUN apk add --no-cache make build-base python3
-
-RUN yarn install
-
-COPY tsconfig.json eslint.config.js .editorconfig .browserslistrc .prettierrc.js ./
-COPY scripts scripts
-COPY emails emails
-
-ENV NODE_ENV=production
-RUN yarn build
-
-FROM ${GO_IMAGE} as go-builder
-
-ARG COMMIT_SHA=""
-ARG BUILD_BRANCH=""
-ARG GO_BUILD_TAGS="oss"
-ARG WIRE_TAGS="oss"
-ARG BINGO="true"
-
-RUN if grep -i -q alpine /etc/issue; then \
-      apk add --no-cache \
-          # This is required to allow building on arm64 due to https://github.com/golang/go/issues/22040
-          binutils-gold \
-          bash \
-          # Install build dependencies
-          gcc g++ make git; \
-    fi
-
-WORKDIR /tmp/grafana
-
-COPY go.* ./
-COPY .bingo .bingo
-
-# Include vendored dependencies
-COPY pkg/util/xorm/go.* pkg/util/xorm/
-COPY pkg/apiserver/go.* pkg/apiserver/
-COPY pkg/apimachinery/go.* pkg/apimachinery/
-COPY pkg/build/go.* pkg/build/
-COPY pkg/build/wire/go.* pkg/build/wire/
-COPY pkg/promlib/go.* pkg/promlib/
-COPY pkg/storage/unified/resource/go.* pkg/storage/unified/resource/
-COPY pkg/storage/unified/apistore/go.* pkg/storage/unified/apistore/
-COPY pkg/semconv/go.* pkg/semconv/
-COPY pkg/aggregator/go.* pkg/aggregator/
-COPY apps/playlist/go.* apps/playlist/
-
-
-COPY embed.go Makefile build.go package.json ./
-COPY cue.mod cue.mod
-COPY kinds kinds
-COPY kindsv2 kindsv2
-COPY local local
-COPY packages/grafana-schema packages/grafana-schema
-COPY public/app/plugins public/app/plugins
-COPY public/api-merged.json public/api-merged.json
-COPY pkg pkg
-COPY scripts scripts
-COPY conf conf
-COPY .github .github
-
-RUN go mod download
-RUN if [[ "$BINGO" = "true" ]]; then \
-      go install github.com/bwplotka/bingo@latest && \
-      bingo get -v; \
-    fi
-
-
-ENV COMMIT_SHA=${COMMIT_SHA}
-ENV BUILD_BRANCH=${BUILD_BRANCH}
-RUN go get github.com/grafana/grafana-app-sdk/app
-RUN go get github.com/grafana/grafana-app-sdk/simple
-RUN go get github.com/grafana/grafana/apps/playlist/pkg/apis
-RUN go get github.com/grafana/grafana/apps/playlist/pkg/apis/playlist/v0alpha1
-RUN go get github.com/grafana/grafana/apps/playlist/pkg/app
-RUN go get github.com/grafana/grafana/pkg/apimachinery/utils
-RUN go get github.com/grafana/grafana/pkg/apiserver/rest
-RUN go get github.com/grafana/grafana/pkg/services/apiserver/builder/runner
-RUN go get github.com/grafana/grafana/pkg/services/apiserver/endpoints/request
-RUN go get github.com/grafana/grafana/pkg/services/featuremgmt
-RUN go get github.com/grafana/grafana/pkg/services/playlist
-RUN go get github.com/grafana/grafana/pkg/setting
-
+ENV GO_BUILD_DEV=1
 RUN go work use .
 RUN go mod tidy
-RUN make build-go GO_BUILD_TAGS=${GO_BUILD_TAGS} WIRE_TAGS=${WIRE_TAGS}
-
-FROM ${BASE_IMAGE} as tgz-builder
-
-WORKDIR /tmp/grafana
-
-ARG GRAFANA_TGZ="grafana-latest.linux-x64-musl.tar.gz"
-
-COPY ${GRAFANA_TGZ} /tmp/grafana.tar.gz
-
-# add -v to make tar print every file it extracts
-RUN tar x -z -f /tmp/grafana.tar.gz --strip-components=1
-
-# helpers for COPY --from
-FROM ${GO_SRC} as go-src
-FROM ${JS_SRC} as js-src
-
-# Final stage
-FROM ${BASE_IMAGE}
-
-LABEL maintainer="Grafana Labs <hello@grafana.com>"
+RUN make build-go
+RUN make gen-jsonnet
 
 ARG GF_UID="472"
 ARG GF_GID="0"
@@ -141,7 +52,6 @@ ENV PATH="/usr/share/grafana/bin:$PATH" \
 
 WORKDIR $GF_PATHS_HOME
 
-# Install dependencies
 RUN if grep -i -q alpine /etc/issue; then \
       apk add --no-cache ca-certificates bash curl tzdata musl-utils && \
       apk info -vv | sort; \
@@ -170,9 +80,7 @@ RUN if grep -i -q alpine /etc/issue && [ `arch` = "x86_64" ]; then \
       rm -f /lib/ld-linux-x86-64.so.2 && \
       rm -f /etc/ld.so.cache; \
     fi
-
-COPY --from=go-src /tmp/grafana/conf ./conf
-
+COPY conf ./conf
 RUN if [ ! $(getent group "$GF_GID") ]; then \
       if grep -i -q alpine /etc/issue; then \
         addgroup -S -g $GF_GID grafana; \
@@ -201,15 +109,14 @@ RUN if [ ! $(getent group "$GF_GID") ]; then \
     chown -R "grafana:$GF_GID_NAME" "$GF_PATHS_DATA" "$GF_PATHS_HOME/.aws" "$GF_PATHS_LOGS" "$GF_PATHS_PLUGINS" "$GF_PATHS_PROVISIONING" && \
     chmod -R 777 "$GF_PATHS_DATA" "$GF_PATHS_HOME/.aws" "$GF_PATHS_LOGS" "$GF_PATHS_PLUGINS" "$GF_PATHS_PROVISIONING"
 
-COPY --from=go-src /tmp/grafana/bin/grafana* /tmp/grafana/bin/*/grafana* ./bin/
-COPY --from=js-src /tmp/grafana/public ./public
-COPY --from=js-src /tmp/grafana/LICENSE ./
+    COPY /bin/grafana* /tmp/grafana/bin/*/grafana* ./bin/
 
-EXPOSE 3000
+    EXPOSE 6000
 
-ARG RUN_SH=./packaging/docker/run.sh
+    ARG RUN_SH=./packaging/docker/run.sh
 
-COPY ${RUN_SH} /run.sh
+    COPY ${RUN_SH} /run.sh
+    
+    USER "$GF_UID"
+    ENTRYPOINT [ "/run.sh" ]
 
-USER "$GF_UID"
-ENTRYPOINT [ "/run.sh" ]
